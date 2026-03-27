@@ -278,6 +278,87 @@
     color: #e74c3c;
   }
   .tip strong { color: #888; }
+
+  /* ── NAME INPUT MODAL ── */
+  #nameModal {
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(0,0,0,0.85);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 100;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.3s;
+  }
+  #nameModal.active { opacity: 1; pointer-events: all; }
+  .name-box {
+    background: #0d0d15;
+    border: 2px solid #e74c3c;
+    border-radius: 12px;
+    padding: 28px 32px;
+    text-align: center;
+    max-width: 360px;
+    width: 90%;
+    box-shadow: 0 0 40px rgba(231,76,60,0.2);
+  }
+  .name-box h2 {
+    font-size: 14px;
+    color: #e74c3c;
+    margin-bottom: 6px;
+    letter-spacing: 2px;
+  }
+  .name-box .name-score {
+    font-size: 24px;
+    color: #f39c12;
+    margin: 10px 0 16px;
+    text-shadow: 0 0 10px rgba(243,156,18,0.4);
+  }
+  .name-box label {
+    font-size: 8px;
+    color: #555;
+    display: block;
+    margin-bottom: 8px;
+  }
+  .name-box input {
+    font-family: 'Press Start 2P', monospace;
+    font-size: 14px;
+    background: #0a0a12;
+    border: 1px solid #1a1a2e;
+    border-radius: 6px;
+    color: #fff;
+    padding: 10px 14px;
+    width: 100%;
+    text-align: center;
+    text-transform: uppercase;
+    letter-spacing: 3px;
+    outline: none;
+    margin-bottom: 16px;
+  }
+  .name-box input:focus { border-color: #e74c3c; }
+  .name-box input::placeholder { color: #333; font-size: 10px; letter-spacing: 1px; }
+  .name-box button {
+    font-family: 'Press Start 2P', monospace;
+    font-size: 10px;
+    background: #e74c3c;
+    color: #fff;
+    border: none;
+    border-radius: 6px;
+    padding: 10px 24px;
+    cursor: pointer;
+    letter-spacing: 1px;
+    transition: background 0.2s;
+  }
+  .name-box button:hover { background: #c0392b; }
+  .name-box .skip-btn {
+    background: none;
+    color: #333;
+    font-size: 7px;
+    margin-top: 10px;
+    padding: 6px;
+  }
+  .name-box .skip-btn:hover { color: #666; }
 </style>
 </head>
 <body>
@@ -405,10 +486,31 @@
   </div>
 </div>
 
+<!-- NAME INPUT MODAL -->
+<div id="nameModal">
+  <div class="name-box">
+    <h2>GAME OVER</h2>
+    <div class="name-score" id="modalScore">0</div>
+    <label>ENTER YOUR NAME FOR THE LEADERBOARD</label>
+    <input type="text" id="nameInput" maxlength="10" placeholder="YOUR NAME" autocomplete="off" spellcheck="false">
+    <br>
+    <button id="nameSubmit">SAVE SCORE</button>
+    <br>
+    <button class="skip-btn" id="nameSkip">SKIP</button>
+  </div>
+</div>
+
 <script>
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d');
 const overlay = document.getElementById('overlay');
+const nameModal = document.getElementById('nameModal');
+const nameInput = document.getElementById('nameInput');
+const nameSubmit = document.getElementById('nameSubmit');
+const nameSkip = document.getElementById('nameSkip');
+const modalScore = document.getElementById('modalScore');
+let waitingForName = false;
+let savedPlayerName = localStorage.getItem('gboyPlayerName') || '';
 
 // ═══════════════════════════════════════
 // PERSISTENT STATS (localStorage)
@@ -442,12 +544,13 @@ function seedLeaderboard() {
   return lb;
 }
 
-function addToLeaderboard(score, coins) {
+function addToLeaderboard(score, coins, playerName) {
   let lb = loadLeaderboard();
   const today = new Date().toISOString().slice(0, 10);
-  lb.push({ name: 'YOU', score: Math.floor(score), coins, date: today });
+  const name = (playerName || 'ANON').toUpperCase().slice(0, 10);
+  lb.push({ name, score: Math.floor(score), coins, date: today });
   lb.sort((a, b) => b.score - a.score);
-  lb = lb.slice(0, 10); // top 10
+  lb = lb.slice(0, 10);
   saveLeaderboard(lb);
   return lb;
 }
@@ -461,7 +564,7 @@ function renderLeaderboard() {
   }
   tbody.innerHTML = lb.map((entry, i) => {
     const rankClass = i === 0 ? 'gold' : i === 1 ? 'silver' : i === 2 ? 'bronze' : '';
-    const nameClass = entry.name === 'YOU' ? 'you' : '';
+    const nameClass = (entry.name === savedPlayerName.toUpperCase() || entry.name === 'YOU') ? 'you' : '';
     return `<tr>
       <td class="lb-rank ${rankClass}">${i + 1}</td>
       <td class="lb-name ${nameClass}">${entry.name}</td>
@@ -808,14 +911,46 @@ function update(){
       saveStats(stats);
       highScore=stats.highScore;
 
-      // Update leaderboard
-      addToLeaderboard(score,totalCoins);
-      renderLeaderboard();
       updateStatsDisplay();
 
+      const finalScore = Math.floor(score);
+      const finalCoins = totalCoins;
+      const finalDist = dist;
+
       setTimeout(()=>{
-        overlay.classList.remove('hidden');
-        overlay.innerHTML=`<h1>GAME OVER</h1><div class="score-display">${Math.floor(score)}</div><div class="highscore-display">BEST: ${highScore}</div><p>COINS: ${totalCoins} | DISTANCE: ${dist}m</p><p class="blink" style="margin-top:14px">PRESS SPACE or TAP</p>`;
+        // Show name modal
+        waitingForName = true;
+        modalScore.textContent = finalScore;
+        nameInput.value = savedPlayerName;
+        nameModal.classList.add('active');
+        setTimeout(() => nameInput.focus(), 100);
+
+        function submitName() {
+          const name = nameInput.value.trim() || 'ANON';
+          savedPlayerName = name;
+          localStorage.setItem('gboyPlayerName', name);
+          addToLeaderboard(finalScore, finalCoins, name);
+          renderLeaderboard();
+          nameModal.classList.remove('active');
+          waitingForName = false;
+
+          overlay.classList.remove('hidden');
+          overlay.innerHTML=`<h1>GAME OVER</h1><div class="score-display">${finalScore}</div><div class="highscore-display">BEST: ${highScore}</div><p>COINS: ${finalCoins} | DISTANCE: ${finalDist}m</p><p class="blink" style="margin-top:14px">PRESS SPACE or TAP</p>`;
+        }
+
+        function skipName() {
+          addToLeaderboard(finalScore, finalCoins, savedPlayerName || 'ANON');
+          renderLeaderboard();
+          nameModal.classList.remove('active');
+          waitingForName = false;
+
+          overlay.classList.remove('hidden');
+          overlay.innerHTML=`<h1>GAME OVER</h1><div class="score-display">${finalScore}</div><div class="highscore-display">BEST: ${highScore}</div><p>COINS: ${finalCoins} | DISTANCE: ${finalDist}m</p><p class="blink" style="margin-top:14px">PRESS SPACE or TAP</p>`;
+        }
+
+        nameSubmit.onclick = submitName;
+        nameSkip.onclick = skipName;
+        nameInput.onkeydown = (e) => { if(e.key === 'Enter') submitName(); };
       },600);
       return;
     }
@@ -848,6 +983,7 @@ function gameLoop(){update();draw();requestAnimationFrame(gameLoop)}
 // INPUT
 // ═══════════════════════════════════════
 function handleJump(){
+  if(waitingForName) return;
   initAudio();
   if(gameState==='idle'){gameState='running';overlay.classList.add('hidden');reset();nextObstacleAt=frameCount+80}
   else if(gameState==='running'){if(player.jumpCount<player.maxJumps){player.vy=player.jumpCount===0?JUMP_FORCE:JUMP_FORCE*0.85;player.isJumping=true;player.jumpCount++;player.isSliding=false;emitJumpParticles(player.x+25,player.y+DRAW_H/2);player.jumpCount===1?playJump():playDoubleJump()}}
